@@ -1,0 +1,304 @@
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+	<script type="text/javascript" src="copperlicht.js"></script>
+	<script type="text/javascript" src="gmaths.js"></script>
+	<script type="text/javascript" src="sphere.js"></script>
+        <script type="text/javascript" src="particle_system.js"></script>
+</head>
+<body>
+	<div align="center">
+		<b>WebGL Sample</b><br/>
+		<canvas id="3darea" width="640" height="480" style="background-color:#FF0000">
+		</canvas>
+	</div>
+
+     <script id="shader-vs" type="x-shader/x-vertex">
+        #ifdef GL_ES								
+			    precision highp float;						
+	    #endif
+
+            uniform mat4 worldviewproj;					
+
+            attribute vec4 vPosition;
+            attribute vec4 vNormal;
+            attribute vec2 vTexCoord1;
+
+            varying vec2 v_texCoord1;
+
+            void main(){
+                gl_Position = worldviewproj * vPosition;
+                v_texCoord1 = vTexCoord1.st;
+            }
+    </script>
+
+     <script id="shader-fs" type="x-shader/x-fragment">
+        #ifdef GL_ES								
+            precision highp float;
+        #endif
+
+        uniform float alpha;
+        uniform sampler2D texture1;
+
+        varying vec2 v_texCoord1;						    
+        		
+        void main(){
+            gl_FragColor = texture2D(texture1,  v_texCoord1);
+            gl_FragColor.a = alpha; 
+        }
+
+    </script>
+
+    <script id ="ps-shader-vs" type="x-shader/x-vertex">
+        #ifdef GL_ES
+            precision highp float;
+        #endif
+
+        attribute vec3  vPosition;
+        attribute vec2  vTexCoord;
+        attribute float fSize;
+        attribute float fAlpha;
+        attribute vec3  fParticlePos;
+
+        uniform vec3 camPos;
+        uniform vec3 camUp;
+        uniform mat4 view;
+        uniform mat4 proj;
+
+        varying vec2 vTexCoord0;
+        varying float alpha;
+
+        void main(){           
+
+            vec3 w = normalize(camPos - fParticlePos);
+            vec3 v = camUp * fSize;
+            vec3 u = normalize(cross(v, w)) * fSize;
+
+            mat4 billboarMat = mat4(vec4(u,0), vec4(v,0), vec4(w,0) ,vec4(fParticlePos, 1));
+            vec4 pos = billboarMat * vec4(vPosition, 1);
+
+            //pos = vec4(vPosition,1);
+           
+            gl_Position = proj * view * pos;
+
+            vTexCoord0 = vTexCoord;
+            alpha = fAlpha;
+        }
+
+    </script>
+     <script id="ps-shader-fs" type="x-shader/x-fragment">
+        #ifdef GL_ES
+            precision highp float;
+        #endif
+
+        uniform sampler2D s0;
+
+        varying float alpha;
+        varying vec2 vTexCoord0;
+
+        void main(){
+            gl_FragColor = vec4(texture2D(s0,  vTexCoord0).rgb, alpha);
+            //gl_FragColor = vec4(1,1,1,1);
+        }
+
+    </script>
+
+
+    <script type="text/javascript">
+	
+	var engine;
+	var cam;
+	var scene;
+	var sphere;
+	var leftwall;
+	var rightwall;
+	var floor;
+    var pSystem;
+	var gravity = new CL3D.Vect3d(0, -10, 0);
+    var boundForce = new CL3D.Vect3d(0, 20, 0);
+    
+ function main() {
+        // create the 3d engine
+        engine = new CL3D.CopperLicht('3darea', null, null, true);
+
+        if (!engine.initRenderer())
+            return; // this browser doesn't support WebGL
+
+        // add a new 3d scene		
+        scene = new CL3D.Scene();
+        engine.addScene(scene);
+
+        scene.setBackgroundColor(CL3D.createColor(255, 0, 0, 64));
+
+        // add a user controlled camera with a first person shooter style camera controller
+        cam = new CL3D.CameraSceneNode();
+        cam.Pos = new CL3D.Vect3d(0, 10, -20);
+
+        var animator = new CL3D.AnimatorCameraFPS(cam, engine);
+        cam.addAnimator(animator);
+        animator.lookAt(new CL3D.Vect3d(0, 0, 0));
+
+        scene.getRootSceneNode().addChild(cam);
+        scene.setActiveCamera(cam);
+
+        //add left wall
+        leftwall = new CL3D.CubeSceneNode();
+        scene.getRootSceneNode().addChild(leftwall);
+        leftwall.getMaterial(0).Tex1 = engine.getTextureManager().getTexture("wall.jpg", true);
+        leftwall.Scale = new CL3D.Vect3d(0.25, 2, 2);
+        leftwall.Pos = new CL3D.Vect3d(-15, 0, 0);
+        leftwall.updateAbsolutePosition();
+
+        //add right wall
+        rightwall = new CL3D.CubeSceneNode();
+        scene.getRootSceneNode().addChild(rightwall);
+        rightwall.getMaterial(0).Tex1 = engine.getTextureManager().getTexture("wall.jpg");
+        rightwall.Scale = new CL3D.Vect3d(0.25, 2, 2);
+        rightwall.Pos = new CL3D.Vect3d(15, 0, 0);
+        rightwall.updateAbsolutePosition();
+
+        //add floor
+        floor = new CL3D.CubeSceneNode(1);
+        floor.getMaterial(0).Tex1 = engine.getTextureManager().getTexture("wall.jpg");
+        floor.Scale = new CL3D.Vect3d(30, 0.1, 30);
+        floor.Pos = new CL3D.Vect3d(0, -10, 0);
+        floor.Selector = new CL3D.MeshTriangleSelector(floor.getMesh(), floor);
+        floor.updateAbsolutePosition();
+        scene.getRootSceneNode().addChild(floor);
+
+        //add Sphere
+        sphere = new SphereSceneNode(engine, 32, 32, 3, "earthmap.jpg");
+        sphere.Pos = new CL3D.Vect3d(0, 5, 0);
+        sphere.addAnimator(new SphereAnimator(sphere));
+        sphere.addAnimator(new CL3D.AnimatorOnProximity(scene, 0.1, sphere.Id, collideResponseFunc, false));
+        scene.getRootSceneNode().addChild(sphere);
+        setShaders(sphere);
+        sphere.alpha = 1;
+        sphere.boundForce = boundForce.clone();
+
+        //add particle system
+        pSystem = new ParticleSystemNode(engine,100,'earthmap.jpg');
+        pSystem.emitter.linearVelocity = 10;
+        pSystem.emitter.emitDirectionWindow = new Spherical(Math.PI/2,2 * Math.PI);
+        pSystem.force = gravity.clone();
+        pSystem.particlesToEmit = 100;
+        pSystem.particleLifeSpand = 2;
+        pSystem.particleMinSize = 0.5;
+        pSystem.particleMaxSize = 1;
+        pSystem.particleFadeIn = 0;
+        pSystem.particleFadeOff = 0.8;
+        pSystem.particleFade = 0.2;
+
+        pSystem.setShaders(document.getElementById('ps-shader-vs').innerHTML,
+                           document.getElementById('ps-shader-fs').innerHTML);       
+        scene.getRootSceneNode().addChild(pSystem);
+
+        //var onHitTestFunction = function(){ alert('your scene node has been clicked!'); }
+        //sphere.addAnimator(new CL3D.AnimatorOnClick(scene, engine, onHitTestFunction,true));
+        //engine.OnAnimate = function() {		
+        // if (scene)
+        // {
+        // TODO: do your game logic here
+        //	sphere.Rot = new CL3D.Vect3d(0,45,0);
+        //	sphere.updateAbsolutePosition();
+        // }
+        //};
+        //this.StartTime=CL3D.CLTimer.getTime();        
+    }
+	
+    SphereAnimator = function(sphere){
+            this.sphere = sphere;
+    };
+
+    SphereAnimator.prototype = new CL3D.Animator();
+
+    SphereAnimator.prototype.getType= function(){
+            return "SphereAnimator";
+    };
+
+    SphereAnimator.prototype.animateNode = function (n, t) {
+        var deltaT = 1 / 60;
+        sphere.Rot = new CL3D.Vect3d(0, -t / 100, 0);
+
+        if ((sphere.Pos.Y - sphere.radius) > -10) {
+            sphere.Velocity.addToThis(gravity.multiplyWithScal(deltaT));
+        }
+        else {
+            sphere.Pos = new CL3D.Vect3d(0, -10 + sphere.radius, 0);
+            sphere.boundForce.Y *= 3 / 4;
+            sphere.Velocity = sphere.boundForce.clone();
+        }
+        sphere.Pos.addToThis(sphere.Velocity.multiplyWithScal(deltaT));
+
+        return true;
+    };
+
+	function mouseDownHandler() {
+	    var x = engine.getMouseDownX();
+	    var y = engine.getMouseDownY();
+
+	    var rayPos = cam.Pos.clone();
+	    var worldPos = engine.get3DPositionFrom2DPosition(x, y);
+
+	    var rayDir = worldPos.substract(rayPos);
+	    rayDir = rayDir.getNormalized();
+
+	    if (raySphereIntersect(sphere.Pos, sphere.radius, rayPos, rayDir)) {                
+                pSystem.emitter.emitPosition = sphere.Pos.clone();
+                pSystem.emitter.radius = sphere.radius;
+                pSystem.startSystem();
+//            var triangles = new Array();
+//            floor.Selector.getAllTriangles(floor.getAbsoluteTransformation(), triangles);
+//            alert(triangles.length);
+	    }
+
+	}
+
+	function collideResponseFunc() {
+	    alert('now near your scene node!');
+	}
+
+    var canvasElement = document.getElementById('3darea');
+    canvasElement.addEventListener("mousedown", mouseDownHandler, true);
+
+    function setShaders(sphere) {
+        var vs_src = document.getElementById("shader-vs").innerHTML;
+        var fs_src = document.getElementById("shader-fs").innerHTML;
+
+        var renderer = engine.getRenderer();
+        var gl = renderer.getWebGL();
+        var newMaterialType = renderer.createMaterialType(vs_src, fs_src, true, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        if (newMaterialType != -1)
+            sphere.getMaterial(0).Type = newMaterialType;
+        else
+            alert('could not create shader'); //copperLicht will write the exact error line in the html
+
+        engine.getRenderer().OnChangeMaterial = function (mattype) {
+            var renderer = engine.getRenderer();
+            if (renderer && mattype == sphere.getMaterial(0).Type) {
+
+                var gl = renderer.getWebGL();
+
+                // get variable location
+                var program = renderer.getGLProgramFromMaterialType(mattype);
+                var variableLocation = gl.getUniformLocation(program, "alpha");
+
+                 if(pSystem.particlesToEmit > 0)
+                     sphere.alpha = 1;
+                 else
+                     sphere.alpha = 0;
+                 
+                // set the content of the variable
+                gl.uniform1f(variableLocation, sphere.alpha);
+            }
+        };
+
+    }
+
+     main();	
+</script>
+
+    
+
+</body>
+</html>
